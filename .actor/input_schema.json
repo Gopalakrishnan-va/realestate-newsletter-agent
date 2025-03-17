@@ -6,10 +6,29 @@
     "location": {
       "title": "Location",
       "type": "string",
-      "description": "The location to analyze (e.g., 'San Jose, CA' or 'Miami, FL')",
+      "description": "City and State (e.g. 'San Jose, CA')",
+      "editor": "textfield"
+    },
+    "openaiApiKey": {
+      "title": "OpenAI API Key",
+      "type": "string",
+      "description": "Your OpenAI API key",
       "editor": "textfield",
-      "prefill": "San Jose, CA"
+      "isSecret": true
+    },
+    "apifyApiKey": {
+      "title": "Apify API Key",
+      "type": "string",
+      "description": "Your Apify API key",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "debug": {
+      "title": "Debug Mode",
+      "type": "boolean",
+      "description": "Enable debug logging",
+      "default": false
     }
   },
-  "required": ["location"]
+  "required": ["location", "openaiApiKey", "apifyApiKey"]
 }

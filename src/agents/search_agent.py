@@ -1,13 +1,16 @@
 """
-Search Agent Module - Handles URL discovery and validation
+Search Agent Module - Handles finding relevant real estate market sources
 """
 
 import logging
 import re
-from typing import List, Optional
+from typing import Dict, List, Optional
 from dataclasses import dataclass
+from decimal import Decimal
 from apify import Actor
 from apify_client import ApifyClient
+from openai import AsyncOpenAI
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +28,14 @@ class SearchAgent:
         "rocket": r"rocket\.com/homes/market-reports/[a-z]{2}/[a-z-]+(?:/)?$"
     }
 
-    def __init__(self, client: ApifyClient):
+    def __init__(self, client: AsyncOpenAI):
+        """Initialize the SearchAgent with an OpenAI client.
+        
+        Args:
+            client (AsyncOpenAI): The OpenAI client instance to use for API calls
+        """
         self.client = client
+        self.apify_client = ApifyClient(token=os.environ["APIFY_TOKEN"])
 
     def _normalize_location(self, location: str) -> Optional[str]:
         """Normalize location input to a standardized format."""
@@ -60,16 +69,41 @@ class SearchAgent:
             logger.error(f"Error normalizing location '{location}': {str(e)}")
             return None
 
-    async def charge_event(self, event_name: str, amount: float):
-        """Helper function to handle pay-per-event charging"""
+    async def find_sources(self, location: str) -> Dict[str, str]:
+        """Find relevant real estate market sources for the given location.
+        
+        Args:
+            location (str): The city and state to search for
+            
+        Returns:
+            Dict[str, str]: Dictionary of source names to URLs
+        """
         try:
-            await Actor.charge(event_name, amount)
-            logger.info(f"Charged {amount} for {event_name}")
+            # Charge for search initialization
+            await Actor.charge('search-init')
+            
+            # Get normalized location
+            normalized_location = self._normalize_location(location)
+            if not normalized_location:
+                raise ValueError(f"Could not normalize location: {location}")
+            
+            # Search for URLs using Google Search
+            all_urls = await self.search_urls(location)
+            
+            # Filter and validate URLs
+            filtered_urls = await self.filter_urls(all_urls)
+            if not filtered_urls:
+                raise ValueError("No valid URLs found after filtering")
+            
+            # Convert to dictionary format
+            return {url_data.source: url_data.url for url_data in filtered_urls}
+            
         except Exception as e:
-            logger.warning(f"Failed to charge for {event_name}: {str(e)}")
+            logger.error(f"Error finding sources: {str(e)}")
+            raise  # Re-raise the error instead of returning empty dict
 
     async def search_urls(self, location: str) -> List[str]:
-        """Search for market research URLs"""
+        """Search for market research URLs using Apify Google Search Scraper"""
         all_urls = []
         
         try:
@@ -81,9 +115,8 @@ class SearchAgent:
             search_query = f"{normalized_location} real estate market site:zillow.com OR site:redfin.com OR site:realtor.com OR site:rocket.com"
             logger.info(f"Searching with query: {search_query}")
             
-            await self.charge_event('search-init', 0.02)
-            
-            run = self.client.actor("apify/google-search-scraper").call(
+            # Run Google Search scraper
+            run = self.apify_client.actor("apify/google-search-scraper").call(
                 run_input={
                     "queries": search_query,
                     "maxPagesPerQuery": 2,
@@ -94,8 +127,9 @@ class SearchAgent:
                 }
             )
             
+            # Get results from dataset
             dataset_id = run["defaultDatasetId"]
-            items = self.client.dataset(dataset_id).list_items().items
+            items = self.apify_client.dataset(dataset_id).list_items().items
             
             if items and len(items) > 0:
                 for item in items:
@@ -104,15 +138,17 @@ class SearchAgent:
                         if url:
                             all_urls.append(url)
                             logger.info(f"Found URL: {url}")
+                            await Actor.charge('url-processed')
                             
         except Exception as e:
             logger.error(f"Error searching URLs: {str(e)}")
+            raise  # Raise the error instead of falling back to templates
             
         if not all_urls:
             logger.warning("No URLs found in search")
-        else:
-            logger.info(f"Found {len(all_urls)} URLs in total")
+            raise ValueError("No URLs found in search")  # Raise error instead of falling back
             
+        logger.info(f"Found {len(all_urls)} URLs in total")
         return all_urls
 
     async def filter_urls(self, urls: List[str]) -> List[URLData]:
@@ -127,7 +163,7 @@ class SearchAgent:
                         filtered_urls.append(URLData(url=url, source=source))
                         source_counts[source] += 1
                         logger.info(f"Found valid {source} URL: {url}")
-                        await self.charge_event('url-processed', 0.02)
+                        await Actor.charge('url-processed')
                     break
         
         if not filtered_urls:
@@ -135,4 +171,12 @@ class SearchAgent:
         else:
             logger.info(f"Found {len(filtered_urls)} valid URLs")
             
-        return filtered_urls 
+        return filtered_urls
+
+    def _get_template_urls(self, normalized_location: str) -> Dict[str, str]:
+        """Get template URLs as fallback"""
+        return {
+            "zillow": f"https://www.zillow.com/homes/{normalized_location}_rb/",
+            "redfin": f"https://www.redfin.com/city/{normalized_location}",
+            "realtor": f"https://www.realtor.com/realestateandhomes-search/{normalized_location}"
+        } 

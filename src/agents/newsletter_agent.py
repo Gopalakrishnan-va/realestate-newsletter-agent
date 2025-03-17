@@ -3,25 +3,21 @@ Newsletter Agent Module - Handles report generation using OpenAI
 """
 
 import logging
-import os
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Any
 from openai import AsyncOpenAI
 from apify import Actor
 
 logger = logging.getLogger(__name__)
 
 class NewsletterAgent:
-    def __init__(self):
-        self.client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
-    async def charge_event(self, event_name: str, amount: float):
-        """Helper function to handle pay-per-event charging"""
-        try:
-            await Actor.charge(event_name, amount)
-            logger.info(f"Charged {amount} for {event_name}")
-        except Exception as e:
-            logger.warning(f"Failed to charge for {event_name}: {str(e)}")
+    def __init__(self, client: AsyncOpenAI):
+        """Initialize the NewsletterAgent with an OpenAI client.
+        
+        Args:
+            client (AsyncOpenAI): The OpenAI client instance to use for API calls
+        """
+        self.client = client
 
     async def generate_newsletter(self, location: str, market_data: Dict, analysis: Dict) -> str:
         """Generate a real estate market newsletter using OpenAI"""
@@ -53,7 +49,8 @@ class NewsletterAgent:
             
             newsletter = response.choices[0].message.content
             
-            await self.charge_event('newsletter-generated', 0.50)
+            # Charge for newsletter generation
+            await Actor.charge('newsletter-generated')
             
             return newsletter
             

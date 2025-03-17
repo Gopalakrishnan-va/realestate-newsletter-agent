@@ -4,22 +4,66 @@ Analysis Agent Module - Handles market data analysis and metrics calculation
 
 import logging
 import re
-from typing import Dict
+from typing import Dict, List
+from decimal import Decimal
 from apify import Actor
+from openai import AsyncOpenAI
+
+from .extraction_agent import MarketData
 
 logger = logging.getLogger(__name__)
 
 class AnalysisAgent:
-    def __init__(self):
+    def __init__(self, client: AsyncOpenAI):
+        """Initialize the AnalysisAgent with an OpenAI client.
+        
+        Args:
+            client (AsyncOpenAI): The OpenAI client instance to use for API calls
+        """
+        self.client = client
         self.high_cost_markets = ["new york", "san francisco", "los angeles", "seattle", "boston", "miami"]
 
-    async def charge_event(self, event_name: str, amount: float):
-        """Helper function to handle pay-per-event charging"""
+    async def analyze_market(self, market_data: List[MarketData], location: str = "") -> Dict:
+        """Analyze the extracted market data and extract key metrics"""
+        metrics = {
+            "zillow": {},
+            "redfin": {},
+            "realtor": {},
+            "rocket": {}
+        }
+        
+        is_high_cost = any(market.lower() in location.lower() for market in self.high_cost_markets)
+        
+        min_price = 10000
+        max_price = 10000000 if is_high_cost else 2000000
+        min_valid_price = 100000
+        max_valid_price = 5000000 if is_high_cost else 1000000
+        
         try:
-            await Actor.charge(event_name, amount)
-            logger.info(f"Charged {amount} for {event_name}")
+            for data in market_data:
+                source = data.source
+                metrics[source] = {
+                    "median_price": data.median_price,
+                    "price_change": data.price_change,
+                    "inventory": data.inventory,
+                    "days_on_market": data.days_on_market,
+                    "source": source
+                }
+                
+                # Validate metrics
+                if min_price <= data.median_price <= max_price:
+                    await Actor.charge('market-analyzed')
+                    logger.info(f"Successfully analyzed data from {source}")
+                
         except Exception as e:
-            logger.warning(f"Failed to charge for {event_name}: {str(e)}")
+            logger.error(f"Error analyzing market data: {str(e)}")
+        
+        metrics["_meta"] = {
+            "min_valid_price": min_valid_price,
+            "max_valid_price": max_valid_price
+        }
+        
+        return metrics
 
     async def analyze_market_data(self, market_data: Dict, location: str = "") -> Dict:
         """Analyze the extracted market data and extract key metrics"""
@@ -30,7 +74,7 @@ class AnalysisAgent:
             "rapid": {}
         }
         
-        await self.charge_event('analysis-init', 0.02)
+        await Actor.charge('market-analyzed')
         
         is_high_cost = any(market.lower() in location.lower() for market in self.high_cost_markets)
         
@@ -55,7 +99,7 @@ class AnalysisAgent:
                 
                 if metrics[source]:
                     metrics_found = True
-                    await self.charge_event('market-analyzed', 0.02)
+                    await Actor.charge('market-analyzed')
                 
                 metrics[source]["source_date"] = data.get("metadata", {}).get("loadedTime", "")
                 

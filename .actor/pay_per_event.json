@@ -8,5 +8,30 @@
         "eventTitle": "Price for completing the task",
         "eventDescription": "Flat fee for completing the task.",
         "eventPriceUsd": 0.4
+    },
+    "search-init": {
+        "eventTitle": "Search Initialization",
+        "eventDescription": "Charged when a new market search is initiated for a location",
+        "eventPriceUsd": 0.02
+    },
+    "url-processed": {
+        "eventTitle": "URL Processing",
+        "eventDescription": "Charged per validated URL from real estate sources (Zillow, Redfin, Realtor, Rocket)",
+        "eventPriceUsd": 0.02
+    },
+    "data-extracted": {
+        "eventTitle": "Data Extraction",
+        "eventDescription": "Charged per source when market data is successfully extracted from the webpage",
+        "eventPriceUsd": 0.02
+    },
+    "market-analyzed": {
+        "eventTitle": "Market Analysis",
+        "eventDescription": "Charged per source when market data is successfully analyzed and validated",
+        "eventPriceUsd": 0.02
+    },
+    "newsletter-generated": {
+        "eventTitle": "Newsletter Generation",
+        "eventDescription": "Charged for generating the final market analysis newsletter with compiled insights",
+        "eventPriceUsd": 0.50
     }
 }

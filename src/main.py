@@ -9,6 +9,7 @@ import logging
 import os
 from apify import Actor
 from apify_client import ApifyClient
+from openai import AsyncOpenAI
 
 from .agents.search_agent import SearchAgent
 from .agents.extraction_agent import ExtractionAgent
@@ -23,80 +24,110 @@ logger = logging.getLogger(__name__)
 async def main() -> None:
     """Main entry point for the Apify Actor."""
     async with Actor:
+        logger.info("Starting real estate market analysis actor")
+        
         # Get input
         actor_input = await Actor.get_input() or {}
-        location = actor_input.get("location", "San Jose, CA")
-        if actor_input.get('debug', False):
-            Actor.log.setLevel(logging.DEBUG)
-
-        # Initialize state
-        state = AgentState(location=location)
+        logger.info(f"Received input with keys: {', '.join(actor_input.keys())}")
+        
+        # Set API keys from input
+        openai_api_key = actor_input.get("openaiApiKey")
+        apify_api_key = actor_input.get("apifyApiKey")
+        
+        if not openai_api_key:
+            logger.error("OpenAI API key is required in input")
+            return
+        logger.info("OpenAI API key validated")
+            
+        if not apify_api_key:
+            logger.error("Apify API key is required in input")
+            return
+        logger.info("Apify API key validated")
+        
+        # Get location
+        location = actor_input.get("location")
+        if not location:
+            logger.error("Location is required")
+            return
+        logger.info(f"Processing location: {location}")
+            
+        # Set environment variables for API keys
+        os.environ["OPENAI_API_KEY"] = openai_api_key
+        os.environ["APIFY_TOKEN"] = apify_api_key
+        logger.info("Environment variables set")
+            
+        # Initialize OpenAI client
+        try:
+            openai_client = AsyncOpenAI(api_key=openai_api_key)
+            logger.info("OpenAI client initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI client: {str(e)}")
+            return
+        
+        # Initialize Apify client
+        try:
+            apify_client = ApifyClient(token=apify_api_key)
+            logger.info("Apify client initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize Apify client: {str(e)}")
+            return
+            
+        # Initialize agents with shared OpenAI client
+        try:
+            newsletter_agent = NewsletterAgent(client=openai_client)
+            search_agent = SearchAgent(client=openai_client)
+            extraction_agent = ExtractionAgent(client=openai_client)
+            analysis_agent = AnalysisAgent(client=openai_client)
+            logger.info("All agents initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize agents: {str(e)}")
+            return
         
         try:
-            # Initialize Apify client
-            client = ApifyClient(token=os.environ.get("APIFY_TOKEN"))
-            
-            # Ensure OpenAI API key is set
-            if not os.environ.get("OPENAI_API_KEY"):
-                raise ValueError("OPENAI_API_KEY environment variable is not set")
-            
-            # Initialize agents
-            search_agent = SearchAgent(client)
-            extraction_agent = ExtractionAgent(client)
-            analysis_agent = AnalysisAgent()
-            newsletter_agent = NewsletterAgent()
-            
-            # Search for URLs
-            logger.info(f"Searching for market data URLs for location: {location}")
-            urls = await search_agent.search_urls(location)
-            state.search_urls = urls
-            
+            # Execute workflow
+            logger.info("Starting source search...")
+            urls = await search_agent.find_sources(location)
             if not urls:
-                state.errors.append("No URLs found in initial search")
-                logger.error("No URLs found in initial search")
+                logger.error("No valid URLs found for the location")
                 return
-            
-            # Filter and validate URLs
-            filtered_urls = await search_agent.filter_urls(urls)
-            state.filtered_urls = filtered_urls
-            
-            if not filtered_urls:
-                state.errors.append("No valid URLs found after filtering")
-                logger.error("No valid URLs found after filtering")
+            logger.info(f"Found {len(urls)} valid URLs")
+                
+            logger.info("Starting data extraction...")
+            market_data = await extraction_agent.extract_data(urls)
+            if not market_data:
+                logger.error("No market data could be extracted from URLs")
                 return
-            
-            # Extract market data from filtered URLs
-            logger.info("Extracting market data from filtered URLs...")
-            market_data = await extraction_agent.extract_market_data(filtered_urls)
-            
-            # Analyze market data
-            logger.info("Analyzing market data...")
-            analysis = await analysis_agent.analyze_market_data(market_data, location)
-            
-            # Generate newsletter
+            logger.info(f"Extracted market data from {len(market_data) if isinstance(market_data, list) else len(market_data.keys())} sources")
+                
+            logger.info("Starting market analysis...")
+            analysis = await analysis_agent.analyze_market(market_data)
+            if not analysis:
+                logger.error("Market analysis failed to produce results")
+                return
+            logger.info("Market analysis completed successfully")
+                
             logger.info("Generating newsletter...")
             newsletter = await newsletter_agent.generate_newsletter(location, market_data, analysis)
+            if not newsletter:
+                logger.error("Newsletter generation failed")
+                return
+            logger.info("Newsletter generated successfully")
             
-            # Save results to default dataset
+            # Save output
+            logger.info("Saving results...")
             await Actor.push_data({
                 "location": location,
-                "filtered_urls": {
-                    url_data.source: url_data.url 
-                    for url_data in filtered_urls
-                },
+                "filtered_urls": urls,
                 "market_data": market_data,
                 "analysis": analysis,
                 "newsletter": newsletter
             })
+            logger.info("Results saved successfully")
             
         except Exception as e:
-            logger.error(f"Error in actor execution: {str(e)}")
-            state.errors.append(f"Error in actor execution: {str(e)}")
-        
-        finally:
-            # Always exit properly
-            await Actor.exit()
+            logger.error(f"Actor failed with error: {str(e)}")
+            logger.exception("Detailed error traceback:")
+            raise
 
-# Run the actor
 if __name__ == "__main__":
     Actor.main(main)

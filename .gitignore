@@ -155,3 +155,7 @@ cython_debug/
 
 # Added by Apify CLI
 node_modules
+src/data_analysis_logic.py
+src/data_parsing_logic.py
+src/data_validation_logic.py
+src/data_validation_logic1.py
