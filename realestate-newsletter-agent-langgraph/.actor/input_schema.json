@@ -1,0 +1,15 @@
+{
+  "title": "Real Estate Newsletter Agent",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "location": {
+      "title": "Location",
+      "type": "string",
+      "description": "The location to analyze (e.g., 'San Jose, CA' or 'Miami, FL')",
+      "editor": "textfield",
+      "prefill": "San Jose, CA"
+    }
+  },
+  "required": ["location"]
+}
