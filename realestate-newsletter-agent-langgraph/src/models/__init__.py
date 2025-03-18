@@ -1,1 +1,0 @@
-"""Models package for the Real Estate Newsletter Agent.""" 
